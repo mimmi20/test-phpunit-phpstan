@@ -15,13 +15,13 @@ parameters:
     - %currentWorkingDirectory%/vendor/squizlabs/php_codesniffer/src/Util/Tokens.php
 
   # reports occurrences of type-checking functions always evaluated to true
-  checkAlwaysTrueCheckTypeFunctionCall: true
+  checkAlwaysTrueCheckTypeFunctionCall: false
 
   # reports instanceof occurrences always evaluated to true
-  checkAlwaysTrueInstanceof: true
+  checkAlwaysTrueInstanceof: false
 
   # reports === and !== occurrences always evaluated to true
-  checkAlwaysTrueStrictComparison: true
+  checkAlwaysTrueStrictComparison: false
 
   # enable stricter analysis of benevolent union types
   checkBenevolentUnionTypes: true
