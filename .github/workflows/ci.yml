@@ -1,0 +1,554 @@
+# https://help.github.com/en/categories/automating-your-workflow-with-github-actions
+
+on:
+  workflow_call:
+    inputs:
+      extensions:
+        required: false
+        type: string
+        default: ""
+      ini-values:
+        required: true
+        type: string
+      composer-options:
+        required: true
+        type: string
+      composer-outdated-option:
+        required: true
+        type: string
+        default: ""
+      skip-phpstan:
+        required: true
+        type: boolean
+      skip-phplint:
+        required: true
+        type: boolean
+      skip-rector:
+        required: true
+        type: boolean
+      skip-phpmd:
+        required: true
+        type: boolean
+      skip-psalm:
+        required: true
+        type: boolean
+    secrets:
+      envPAT:
+        required: true
+
+jobs:
+  validate:
+    name: "Validate composer"
+
+    runs-on: "ubuntu-20.04"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        php-version:
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Validate composer.json"
+        run: "composer validate --strict"
+
+  install:
+    name: "Install dependencies"
+
+    needs: "validate"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: ${{ '8.3' == matrix.php-version }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          - "8.1"
+          - "8.2"
+          - "8.3"
+
+        dependencies:
+          - "highest"
+          - "lowest"
+
+        ts:
+          - "ts"
+          - "nts"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "${{ matrix.ts }}"
+
+      - name: "Update dependencies with composer"
+        if: ${{ '8.3' != matrix.php-version }}
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "${{ matrix.dependencies }}"
+          composer-options: "${{ inputs.composer-options }}"
+
+      - name: "Update dependencies with composer"
+        if: ${{ '8.3' == matrix.php-version }}
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "${{ matrix.dependencies }}"
+          composer-options: "${{ inputs.composer-options }} --ignore-platform-reqs"
+
+      - name: "Check dependencies with composer"
+        run: "composer outdated --direct${{ inputs.composer-outdated-option }}"
+
+  php-lint:
+    name: "Linting with overtrue/phplint"
+
+    needs: "install"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    if: inputs.skip-phplint == false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          # Should use the lowest supported version
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Lint PHP"
+        run: |
+          curl -Ls https://github.com/overtrue/phplint/releases/download/9.0.3/phplint.phar -o /usr/local/bin/phplint
+          chmod +x /usr/local/bin/phplint
+          /usr/local/bin/phplint -v --no-cache
+
+  php-cs-fixer:
+    name: "Check Coding Standards with PHP-CS-Fixer"
+
+    needs: "install"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          # Should use the lowest supported version to ensure the CS-Fixer does
+          # not get confused and apply a rule that would break on lower supported
+          # versions.
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2, cs2pr"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Update dependencies with composer"
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "highest"
+          composer-options: "${{ inputs.composer-options }}"
+
+      - name: "Run friendsofphp/php-cs-fixer"
+        run: "vendor/bin/php-cs-fixer fix --dry-run -vv --diff"
+        continue-on-error: true
+
+      - name: "Run friendsofphp/php-cs-fixer"
+        run: "vendor/bin/php-cs-fixer fix --dry-run --format=checkstyle | cs2pr"
+
+  phpcs:
+    name: "Check Coding Standards with PHPCS"
+
+    needs: "install"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          # Should use the lowest supported version to ensure the PHHPCS does
+          # not get confused and apply a rule that would break on lower supported
+          # versions.
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2, cs2pr"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Update dependencies with composer"
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "highest"
+          composer-options: "${{ inputs.composer-options }}"
+
+      - name: "Run squizlabs/php_codesniffer"
+        run: "vendor/bin/phpcs --report=checkstyle -q | cs2pr"
+
+  static-code-analysis:
+    name: "Static Code Analysis with PHPStan"
+
+    needs: "install"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    if: inputs.skip-phpstan == false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Update dependencies with composer"
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "highest"
+          composer-options: "${{ inputs.composer-options }}"
+
+      - name: "Run phpstan/phpstan"
+        run: "vendor/bin/phpstan analyse -c phpstan.neon --memory-limit=768M --no-progress"
+
+  phpmd:
+    name: "Check Rules with PHPMD"
+
+    needs: "install"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    if: inputs.skip-phpmd == false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2, phpmd"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Update dependencies with composer"
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "highest"
+          composer-options: "${{ inputs.composer-options }}"
+
+      - name: "Run phpmd/phpmd"
+        run: "phpmd src github phpmd.ruleset.xml"
+
+  rector:
+    name: "Checks with Rector"
+
+    needs: "install"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    if: inputs.skip-rector == false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "none, phar, json, opcache, ${{ inputs.extensions }}"
+          ini-values: "${{ inputs.ini-values }}"
+          coverage: "none"
+          tools: "composer:v2"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Update dependencies with composer"
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "highest"
+          composer-options: "${{ inputs.composer-options }}"
+
+      - name: "Run checks with rector/rector"
+        run: "rector process --ansi --dry-run"
+        continue-on-error: true
+
+      - name: "Run checks with rector/rector"
+        run: "vendor/bin/rector process --ansi --dry-run --no-diffs"
+
+  psalm:
+    name: "Checks with Psalm"
+
+    needs: "install"
+
+    runs-on: "${{ matrix.operating-system }}"
+    timeout-minutes: 10
+    continue-on-error: false
+
+    if: inputs.skip-psalm == false
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        operating-system:
+          - "ubuntu-20.04"
+          - "ubuntu-22.04"
+
+        php-version:
+          - "8.1"
+
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@2.25.1"
+        with:
+          php-version: "${{ matrix.php-version }}"
+          extensions: "${{ env.PHP_EXTENSIONS }}"
+          ini-values: "${{ env.PHP_INI_VALUES }}"
+          coverage: "none"
+          tools: "${{ env.TOOLS }}, rector"
+        env:
+          fail-fast: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          phpts: "ts"
+
+      - name: "Update dependencies with composer"
+        uses: "ramsey/composer-install@2.2.0"
+        with:
+          dependency-versions: "highest"
+          composer-options: "${{ inputs.composer-options }}"
+
+      - name: "Run checks with rector/rector"
+        run: "vendor/bin/psalm"
+
+  # This is a meta job to avoid to have to constantly change the protection rules
+  # whenever we touch the matrix.
+  tests-status:
+    name: "Validate & Lint Status"
+
+    runs-on: "ubuntu-22.04"
+
+    if: always()
+
+    needs:
+      - "validate"
+      - "install"
+      - "php-lint"
+      - "php-cs-fixer"
+      - "phpcs"
+      - "static-code-analysis"
+      - "phpmd"
+      - "rector"
+      - "psalm"
+
+    steps:
+      - name: Successful run
+        if: ${{ !(contains(needs.*.result, 'failure')) }}
+        run: exit 0
+
+      - name: Failing run
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: exit 1
