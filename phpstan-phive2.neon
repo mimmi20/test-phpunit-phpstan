@@ -15,7 +15,7 @@ parameters:
     - %currentWorkingDirectory%/vendor/squizlabs/php_codesniffer/src/Util/Tokens.php
 
   bootstrapFiles:
-    - phar://%rootDir%/../../../tools/phpunit.phar
+    - tools/phpunit.phar
 
   # reports occurrences of type-checking functions always evaluated to true
   checkAlwaysTrueCheckTypeFunctionCall: false

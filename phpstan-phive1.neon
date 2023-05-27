@@ -13,6 +13,8 @@ parameters:
     - %currentWorkingDirectory%/vendor/autoload.php
     - %currentWorkingDirectory%/vendor/squizlabs/php_codesniffer/autoload.php
     - %currentWorkingDirectory%/vendor/squizlabs/php_codesniffer/src/Util/Tokens.php
+
+  scanDirectories:
     - phar://%rootDir%/../../../tools/phpunit.phar
 
   # reports occurrences of type-checking functions always evaluated to true
